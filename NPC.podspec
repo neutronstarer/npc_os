@@ -94,7 +94,7 @@ Pod::Spec.new do |spec|
   spec.source_files  = "NPC/"
   # spec.exclude_files = "Classes/Exclude"
 
-  spec.public_header_files = "NPC/*.h"
+  spec.public_header_files = "NPC/"
 
 
   # ――― Resources ―――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――― #
