@@ -16,7 +16,7 @@ Pod::Spec.new do |spec|
   #
 
   spec.name         = "NPC"
-  spec.version      = "1.0.1"
+  spec.version      = "1.0.2"
   spec.summary      = "Near Procedure Call."
 
   # This description is used to generate tags and improve search results.
@@ -69,10 +69,15 @@ Pod::Spec.new do |spec|
 
   #  When using multiple platforms
   spec.ios.deployment_target = "9.0"
-  spec.osx.deployment_target = "10.9"
+  spec.osx.deployment_target = "10.10"
   spec.watchos.deployment_target = "2.0"
   spec.tvos.deployment_target = "9.0"
 
+
+  spec.ios.pod_target_xcconfig = { 'PRODUCT_BUNDLE_IDENTIFIER' => 'com.neutronstarer.npc' }
+  spec.osx.pod_target_xcconfig = { 'PRODUCT_BUNDLE_IDENTIFIER' => 'com.neutronstarer.npc' }
+  spec.watchos.pod_target_xcconfig = { 'PRODUCT_BUNDLE_IDENTIFIER' => 'com.neutronstarer.npc.watch' }
+  spec.tvos.pod_target_xcconfig = { 'PRODUCT_BUNDLE_IDENTIFIER' => 'com.neutronstarer.npc' }
 
   # ――― Source Location ―――――――――――――――――――――――――――――――――――――――――――――――――――――――――― #
   #
