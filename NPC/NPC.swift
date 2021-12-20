@@ -49,7 +49,7 @@ open class NPC: NSObject {
         _semphore.wait()
         let id = _id
         _id += 1
-        let onReply = {[weak self] (_ param: Any?, _ error: Any?)->Bool in
+        let reply = {[weak self] (_ param: Any?, _ error: Any?)->Bool in
             completedSemphore.wait()
             if (completed){
                 completedSemphore.signal()
@@ -69,7 +69,8 @@ open class NPC: NSObject {
             semphonre.signal()
             return true
         }
-        if let onNotify = onNotify {
+        _replies[id] = reply
+        if let notify = onNotify {
             _notifies[id] = {param in
                 completedSemphore.wait()
                 if (completed){
@@ -77,16 +78,15 @@ open class NPC: NSObject {
                     return
                 }
                 completedSemphore.signal()
-                onNotify(param);
+                notify(param);
             }
         }
-        _replies[id] = onReply
         _semphore.signal()
         if  timeout > 0 {
             timer = DispatchSource.makeTimerSource(flags: [], queue: _queue)
             timer!.schedule(deadline: .now()+timeout)
             timer!.setEventHandler(handler: {[weak self] in
-                if onReply(nil, "timedout") {
+                if reply(nil, "timedout") {
                     guard let self = self else {
                         return
                     }
@@ -97,7 +97,7 @@ open class NPC: NSObject {
             timer!.resume()
         }
         let cancel = {[weak self] in
-            if onReply(nil, "cancelled"){
+            if reply(nil, "cancelled"){
                 guard let self = self else {
                     return
                 }
@@ -162,12 +162,19 @@ open class NPC: NSObject {
                 }
                 completed = true
                 completedSemphore.signal()
+                let semphore = self._semphore
+                semphore.wait()
+                self._cancels.removeValue(forKey: id)
+                semphore.signal()
                 let m = Message(typ: .ack, id: id, param: param, error: error)
                 self._send!(m)
             })
             if let cancel = cancel {
                 _semphore.wait()
-                _cancels[id] = {
+                _cancels[id] = {[weak self] in
+                    guard let self = self else {
+                        return
+                    }
                     completedSemphore.wait()
                     if (completed){
                         completedSemphore.signal()
@@ -175,6 +182,10 @@ open class NPC: NSObject {
                     }
                     completed = true
                     completedSemphore.signal()
+                    let semphore = self._semphore
+                    semphore.wait()
+                    self._cancels.removeValue(forKey: id)
+                    semphore.signal()
                     cancel()
                 }
                 _semphore.signal()
