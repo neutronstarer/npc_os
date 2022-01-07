@@ -14,9 +14,9 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "CE6A9F85276AF17E00EAB982"
+               BlueprintIdentifier = "CE6A9FA2276AF25200EAB982"
                BuildableName = "NPC.framework"
-               BlueprintName = "NPC macOS"
+               BlueprintName = "NPC watchOS"
                ReferencedContainer = "container:NPC.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -50,9 +50,9 @@
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "CE6A9F85276AF17E00EAB982"
+            BlueprintIdentifier = "CE6A9FA2276AF25200EAB982"
             BuildableName = "NPC.framework"
-            BlueprintName = "NPC macOS"
+            BlueprintName = "NPC watchOS"
             ReferencedContainer = "container:NPC.xcodeproj">
          </BuildableReference>
       </MacroExpansion>

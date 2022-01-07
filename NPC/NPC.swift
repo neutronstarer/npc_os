@@ -25,7 +25,7 @@ open class NPC: NSObject {
     }
     /// Register handle by method name.
     @objc
-    open func on(_ method: String, handle: @escaping Handle){
+    public func on(_ method: String, handle: @escaping Handle){
         _semphore.wait()
         defer{
             _semphore.signal()
@@ -34,7 +34,7 @@ open class NPC: NSObject {
     }
     /// Emit method without reply.
     @objc
-    open func emit(_ method: String, param: Any? = nil){
+    public func emit(_ method: String, param: Any? = nil){
         let m = Message(typ: .emit, method: method, param: param)
         _send!(m)
     }
@@ -42,7 +42,7 @@ open class NPC: NSObject {
     /// Deliver message with reply.
     @objc
     @discardableResult
-    open func deliver(_ method: String, param: Any? = nil, timeout: TimeInterval = 0, onNotify: Notify? = nil, onReply: Reply? = nil)->Cancel{
+    public func deliver(_ method: String, param: Any? = nil, timeout: TimeInterval = 0, onNotify: Notify? = nil, onReply: Reply? = nil)->Cancel{
         var completed = false
         let completedSemphore = DispatchSemaphore(value: 1)
         var timer: DispatchSourceTimer?
@@ -109,7 +109,15 @@ open class NPC: NSObject {
         _send!(m)
         return cancel
     }
-    
+    /// Clean up all deliveries with special reason.
+    @objc
+    public func cleanUpDeliveries(with reason: Any?){
+        _semphore.wait()
+        for i in _replies.enumerated(){
+            _ = i.element.value(nil, reason)
+        }
+        _semphore.signal()
+    }
     /// Send message.
     @objc
     open func send(_ message: Message){
@@ -118,7 +126,7 @@ open class NPC: NSObject {
     
     /// Receive message.
     @objc
-    open func receive(_ message: Message){
+    public func receive(_ message: Message){
         switch(message.typ){
         case .emit:
             _semphore.wait()
@@ -230,7 +238,7 @@ open class NPC: NSObject {
     private let _queue = DispatchQueue(label: "com.nuetronstarer.npc")
     private lazy var _cancels = Dictionary<Int, Cancel>()
     private lazy var _notifies = Dictionary<Int, Notify>()
-    private lazy var _replies = Dictionary<Int, (_ param: Any?, _ error: Any?)->Bool>()
+    private lazy var _replies = Dictionary<Int,  (_ param: Any?, _ error: Any?) -> Bool >()
     private lazy var _handlers = Dictionary<String, Handle>()
 }
 
