@@ -11,6 +11,9 @@ public typealias Reply = (_ param: Any?, _ error: Any?) -> Void
 public typealias Send = (_ message: Message) -> Void
 /// `NPC`  Near Procedure Call.
 open class NPC: NSObject {
+    deinit {
+        cleanUpDeliveries(with: "disconnected")
+    }
     /// If `send` is nil, you should extends NPC and override `send(_ message: Message)`.
     @objc
     public init(_ send: Send?){
