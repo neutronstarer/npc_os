@@ -257,6 +257,7 @@ public enum Typ: Int{
 
 /// Message class.
 open class Message: NSObject{
+    @objc
     public init(typ: Typ, id: Int = 0, method: String? = nil, param: Any? = nil, error: Any? = nil){
         self.typ = typ
         self.id = id
