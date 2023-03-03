@@ -75,7 +75,7 @@ public final class NPC: NSObject {
     
     /// Must set this value before work.
     @objc
-    public var send: Send?
+    public var send: Send!
 
     /// Register handle by method name.
     @objc
@@ -90,7 +90,8 @@ public final class NPC: NSObject {
             defer{
                 _semphore.signal()
             }
-            return _handlers[method]
+            let handle = _handlers[method]
+            return handle
         }
         set{
             _semphore.wait()
@@ -104,11 +105,10 @@ public final class NPC: NSObject {
     @objc
     public func emit(_ method: String, param: Any? = nil){
         _semphore.wait()
-        defer{
-            _semphore.signal()
-        }
-        let m = Message(typ: .emit, id: nextId(), method: method, param: param)
-        send!(m)
+        let id = nextId()
+        _semphore.signal()
+        let m = Message(typ: .emit, id: id, method: method, param: param)
+        send(m)
     }
     
     /// Deliver message with reply.
@@ -116,13 +116,10 @@ public final class NPC: NSObject {
     @discardableResult
     public func deliver(_ method: String, param: Any? = nil, timeout: TimeInterval = 0, onReply: Reply? = nil, onNotify: Notify? = nil)->Cancel{
         _semphore.wait()
-        defer{
-            _semphore.signal()
-        }
+        let id = nextId()
         var completed = false
         let completedSemphore = DispatchSemaphore(value: 1)
         var timer: DispatchSourceTimer?
-        let id = nextId()
         let reply = {[weak self] (_ param: Any?, _ error: Any?)->Bool in
             completedSemphore.wait()
             defer{
@@ -134,17 +131,14 @@ public final class NPC: NSObject {
             completed = true
             onReply?(param, error)
             timer?.cancel()
-            timer = nil
             guard let self = self else {
                 return true
             }
             let semphore = self._semphore
             semphore.wait()
-            defer{
-                semphore.signal()
-            }
             self._notifies.removeValue(forKey: id)
             self._replies.removeValue(forKey: id)
+            semphore.signal()
             return true
         }
         _replies[id] = reply
@@ -157,9 +151,10 @@ public final class NPC: NSObject {
                 if (completed){
                     return
                 }
-                onNotify(param);
+                onNotify(param)
             }
         }
+        _semphore.signal()
         if timeout > 0 {
             timer = DispatchSource.makeTimerSource(flags: [], queue: _queue)
             timer!.schedule(deadline: .now() + .nanoseconds(Int(timeout*1000000000)))
@@ -169,7 +164,7 @@ public final class NPC: NSObject {
                         return
                     }
                     let m = Message(typ: .cancel, id: id)
-                    self.send!(m)
+                    self.send(m)
                 }
             })
             timer!.resume()
@@ -180,54 +175,48 @@ public final class NPC: NSObject {
                     return
                 }
                 let m = Message(typ: .cancel, id: id)
-                self.send!(m)
+                self.send(m)
             }
         }
         let m = Message(typ: .deliver, id: id, method: method, param: param)
-        send!(m)
+        send(m)
         return cancel
     }
-    /// Clean up all deliveries with special reason.
-    @objc
-    public func cleanUpDeliveries(with reason: Any?){
-        _semphore.wait()
-        defer{
-            _semphore.signal()
-        }
-        _replies.forEach { (_,value) in
-            _ = value(nil,reason)
-        }
-    }
-    
+
     /// Receive message.
     @objc
     public func receive(_ message: Message){
         switch(message.typ){
         case .emit:
-            _semphore.wait()
-            defer{
-                _semphore.signal()
-            }
-            guard let method = message.method, let handle = _handlers[method] else{
+            guard let method = message.method else{
+                debugPrint("[NPC] bad message: \(message)")
                 break
             }
+            _semphore.wait()
+            guard let handle = _handlers[method] else {
+                debugPrint("[NPC] unhandled message: \(message)")
+                _semphore.signal()
+                break
+            }
+            _semphore.signal()
             let _ = handle(message.param, {param in}, {param,error in})
-            break
         case .deliver:
             var completed = false
             let completedSemphore = DispatchSemaphore(value: 1)
-            _semphore.wait()
-            defer{
-                _semphore.signal()
-            }
             let id = message.id
-            guard let method = message.method, let handle = _handlers[method] else{
+            guard let method = message.method else {
+                debugPrint("[NPC] bad message: \(message)")
                 break
             }
+            _semphore.wait()
+            guard let handle = _handlers[method] else {
+                _semphore.signal()
+                let m = Message(typ: .ack, id: id, error: "unimplemented")
+                send(m)
+                break
+            }
+            _semphore.signal()
             let cancel = handle(message.param, {[weak self] param in
-                guard let self = self else {
-                    return
-                }
                 completedSemphore.wait()
                 defer{
                     completedSemphore.signal()
@@ -235,12 +224,12 @@ public final class NPC: NSObject {
                 if (completed){
                     return
                 }
-                let m = Message(typ: .notify, id: id, param: param)
-                self.send!(m)
-            }, {[weak self] param ,error in
                 guard let self = self else {
                     return
                 }
+                let m = Message(typ: .notify, id: id, param: param)
+                self.send(m)
+            }, {[weak self] param, error in
                 completedSemphore.wait()
                 defer{
                     completedSemphore.signal()
@@ -249,20 +238,19 @@ public final class NPC: NSObject {
                     return
                 }
                 completed = true
+                guard let self = self else {
+                    return
+                }
                 let semphore = self._semphore
                 semphore.wait()
-                defer{
-                    semphore.signal()
-                }
                 self._cancels.removeValue(forKey: id)
+                semphore.signal()
                 let m = Message(typ: .ack, id: id, param: param, error: error)
-                self.send!(m)
+                self.send(m)
             })
             if let cancel = cancel {
+                _semphore.wait()
                 _cancels[id] = {[weak self] in
-                    guard let self = self else {
-                        return
-                    }
                     completedSemphore.wait()
                     defer{
                         completedSemphore.signal()
@@ -271,55 +259,55 @@ public final class NPC: NSObject {
                         return
                     }
                     completed = true
-                    self._cancels.removeValue(forKey: id)
                     cancel()
+                    guard let self = self else {
+                        return
+                    }
+                    let semphore = self._semphore
+                    semphore.wait()
+                    self._cancels.removeValue(forKey: id)
+                    semphore.signal()
                 }
+                _semphore.signal()
             }
-            break
         case .ack:
             _semphore.wait()
-            defer {
-                _semphore.signal()
-            }
-            let id = message.id
-            guard let onReply = _replies[id] else {
-                break
-            }
-            let _ = onReply(message.param, message.error)
-            break
+            let reply = _replies[message.id]
+            _semphore.signal()
+            let _ = reply?(message.param, message.error)
         case .notify:
             _semphore.wait()
-            defer {
-                _semphore.signal()
-            }
-            let id = message.id
-            guard  let onNotify = _notifies[id] else {
-                break
-            }
-            onNotify(message.param)
-            break
+            let notify = _notifies[message.id]
+            _semphore.signal()
+            notify?(message.param)
         case .cancel:
             _semphore.wait()
-            defer {
-                _semphore.signal()
-            }
-            let id = message.id
-            guard let cancel = _cancels[id] else {
-                break
-            }
-            cancel()
-            break
+            let cancel = _cancels[message.id]
+            _semphore.signal()
+            cancel?()
         }
     }
+    
+    /// Clean up all deliveries with special reason.
+    @objc
+    public func cleanUpDeliveries(with reason: Any?){
+        _semphore.wait()
+        _replies.forEach { (_,value) in
+            _ = value(nil,reason)
+        }
+        _semphore.signal()
+    }
+    
     private func nextId() -> Int{
-        if _id < Int.max {
+        if _id < 0x7fffffff {
             _id += 1
         }else{
             _id = 0
         }
         return _id
     }
-    private var _id = 0
+    
+    private var _id = -1
     private let _semphore = DispatchSemaphore(value: 1)
     private let _queue = DispatchQueue(label: "com.nuetronstarer.npc")
     private lazy var _cancels = Dictionary<Int, Cancel>()
