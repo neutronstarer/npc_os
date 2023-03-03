@@ -68,10 +68,10 @@ Pod::Spec.new do |spec|
   # spec.platform     = :ios, "5.0"
 
   #  When using multiple platforms
-  spec.ios.deployment_target = "9.0"
-  spec.osx.deployment_target = "10.10"
-  spec.watchos.deployment_target = "2.0"
-  spec.tvos.deployment_target = "9.0"
+  spec.ios.deployment_target = "11.0"
+  spec.osx.deployment_target = "10.13"
+  spec.watchos.deployment_target = "4.0"
+  spec.tvos.deployment_target = "11.0"
 
 
   spec.ios.pod_target_xcconfig = { 'PRODUCT_BUNDLE_IDENTIFIER' => 'com.neutronstarer.npc' }
