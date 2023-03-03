@@ -1,7 +1,69 @@
 import Foundation
 
+/// Cancel.
+public typealias Cancel = ()->Void
+/// Method Handle.
+public typealias Handle = (_ param: Any?, _ notify: @escaping Notify, _ reply: @escaping Reply) -> Cancel?
+/// Notify.
+public typealias Notify = (_ param: Any?) -> Void
+/// Reply.
+public typealias Reply = (_ param: Any?, _ error: Any?) -> Void
+/// Send message.
+public typealias Send = (_ message: Message) -> Void
+
+/// Message class.
+public final class Message: NSObject{
+    /// Message type.
+    @objc
+    public enum Typ: Int {
+        case emit
+        case deliver
+        case notify
+        case ack
+        case cancel
+    }
+    @objc
+    public init(typ: Typ, id: Int, method: String? = nil, param: Any? = nil, error: Any? = nil){
+        self.typ = typ
+        self.id = id
+        self.method = method
+        self.param = param
+        self.error = error
+    }
+    @objc
+    public let typ: Typ
+    @objc
+    public let id: Int
+    @objc
+    public let method: String?
+    @objc
+    public let param: Any?
+    @objc
+    public let error: Any?
+    
+    public override var description: String{
+        get {
+            var v = Dictionary<String, Any>()
+            v["typ"] = typ.rawValue
+            v["id"] = id
+            if let method = method {
+                v["method"] = method
+            }
+            if let param = param {
+                v["param"] = param
+            }
+            if let error = error {
+                v["error"] = error
+            }
+            return v.description
+        }
+    }
+
+}
+
 /// `NPC`  Near Procedure Call.
 public final class NPC: NSObject {
+    
     deinit {
         cleanUpDeliveries(with: "disconnected")
     }
@@ -17,16 +79,34 @@ public final class NPC: NSObject {
 
     /// Register handle by method name.
     @objc
-    public func on(_ method: String, handle: @escaping Handle){
-        _semphore.wait()
-        defer{
-            _semphore.signal()
+    public func on(_ method: String, handle: Handle?){
+        self[method] = handle
+    }
+    
+    /// Register handle by method name.
+    public subscript(_ method: String) -> Handle? {
+        get{
+            _semphore.wait()
+            defer{
+                _semphore.signal()
+            }
+            return _handlers[method]
         }
-        _handlers[method] = handle
+        set{
+            _semphore.wait()
+            defer{
+                _semphore.signal()
+            }
+            _handlers[method] = newValue
+        }
     }
     /// Emit method without reply.
     @objc
     public func emit(_ method: String, param: Any? = nil){
+        _semphore.wait()
+        defer{
+            _semphore.signal()
+        }
         let m = Message(typ: .emit, id: nextId(), method: method, param: param)
         send!(m)
     }
@@ -34,13 +114,16 @@ public final class NPC: NSObject {
     /// Deliver message with reply.
     @objc
     @discardableResult
-    public func deliver(_ method: String, param: Any? = nil, timeout: TimeInterval = 0, onNotify: Notify? = nil, onReply: Reply? = nil)->Cancel{
+    public func deliver(_ method: String, param: Any? = nil, timeout: TimeInterval = 0, onReply: Reply? = nil, onNotify: Notify? = nil)->Cancel{
+        _semphore.wait()
+        defer{
+            _semphore.signal()
+        }
         var completed = false
-        var reply = onReply
         let completedSemphore = DispatchSemaphore(value: 1)
         var timer: DispatchSourceTimer?
         let id = nextId()
-        let doReply = {[weak self] (_ param: Any?, _ error: Any?)->Bool in
+        let reply = {[weak self] (_ param: Any?, _ error: Any?)->Bool in
             completedSemphore.wait()
             defer{
                 completedSemphore.signal()
@@ -49,10 +132,9 @@ public final class NPC: NSObject {
                 return false
             }
             completed = true
+            onReply?(param, error)
             timer?.cancel()
             timer = nil
-            reply?(param, error)
-            reply = nil
             guard let self = self else {
                 return true
             }
@@ -65,8 +147,8 @@ public final class NPC: NSObject {
             self._replies.removeValue(forKey: id)
             return true
         }
-        _replies[id] = doReply
-        if let notify = onNotify {
+        _replies[id] = reply
+        if let onNotify = onNotify {
             _notifies[id] = {param in
                 completedSemphore.wait()
                 defer{
@@ -75,14 +157,14 @@ public final class NPC: NSObject {
                 if (completed){
                     return
                 }
-                notify(param);
+                onNotify(param);
             }
         }
         if timeout > 0 {
             timer = DispatchSource.makeTimerSource(flags: [], queue: _queue)
-            timer!.schedule(deadline: .now() + .milliseconds(Int(timeout*1000)))
+            timer!.schedule(deadline: .now() + .nanoseconds(Int(timeout*1000000000)))
             timer!.setEventHandler(handler: {[weak self] in
-                if doReply(nil, "timedout") {
+                if reply(nil, "timedout") {
                     guard let self = self else {
                         return
                     }
@@ -93,7 +175,7 @@ public final class NPC: NSObject {
             timer!.resume()
         }
         let cancel = {[weak self] in
-            if doReply(nil, "cancelled"){
+            if reply(nil, "cancelled"){
                 guard let self = self else {
                     return
                 }
@@ -230,10 +312,6 @@ public final class NPC: NSObject {
         }
     }
     private func nextId() -> Int{
-        _semphore.wait()
-        defer{
-            _semphore.signal()
-        }
         if _id < Int.max {
             _id += 1
         }else{

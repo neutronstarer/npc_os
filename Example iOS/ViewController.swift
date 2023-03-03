@@ -21,7 +21,7 @@ class ViewController: UIViewController {
     lazy var n0: NPC = {[weak self] in
         let v = NPC()
         v.send = {[weak self] message in
-            NSLog("0_SEND: \(message)")
+            debugPrint("0_SEND: \(message)")
             self?.n1.receive(message)
         }
         self?.config(v)
@@ -31,7 +31,7 @@ class ViewController: UIViewController {
     lazy var n1: NPC = {[weak self] in
         let v = NPC()
         v.send = {[weak self] message in
-            NSLog("1_SEND: \(message)")
+            debugPrint("1_SEND: \(message)")
             self?.n0.receive(message)
         }
         self?.config(v)
@@ -51,14 +51,7 @@ class ViewController: UIViewController {
             return
         }
         self.button.setTitle("Cancel", for: .normal)
-        self.cancel = n0.deliver("download", param: "/path", timeout: Double(textFeild.text ?? "0") ?? 0, onNotify: {[weak self] param in
-            guard let self = self else {
-                return
-            }
-            DispatchQueue.main.async {
-                self.label.text = param as? String
-            }
-        }, onReply: {[weak self] param, error in
+        self.cancel = n0.deliver("download", param: "/path", timeout: Double(textFeild.text ?? "0") ?? 0, onReply: {[weak self] param, error in
             guard let self = self else {
                 return
             }
@@ -73,6 +66,13 @@ class ViewController: UIViewController {
                     self.label.text = param
                     return
                 }
+            }
+        },onNotify: {[weak self] param in
+            guard let self = self else {
+                return
+            }
+            DispatchQueue.main.async {
+                self.label.text = param as? String
             }
         })
     }
