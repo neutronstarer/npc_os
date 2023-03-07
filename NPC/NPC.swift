@@ -87,18 +87,14 @@ public final class NPC: NSObject {
     public subscript(_ method: String) -> Handle? {
         get{
             _semphore.wait()
-            defer{
-                _semphore.signal()
-            }
             let handle = _handlers[method]
+            _semphore.signal()
             return handle
         }
         set{
             _semphore.wait()
-            defer{
-                _semphore.signal()
-            }
             _handlers[method] = newValue
+            _semphore.signal()
         }
     }
     /// Emit method without reply.
@@ -122,15 +118,14 @@ public final class NPC: NSObject {
         var timer: DispatchSourceTimer?
         let reply = {[weak self] (_ param: Any?, _ error: Any?)->Bool in
             completedSemphore.wait()
-            defer{
-                completedSemphore.signal()
-            }
             if (completed){
+                completedSemphore.signal()
                 return false
             }
             completed = true
-            onReply?(param, error)
+            completedSemphore.signal()
             timer?.cancel()
+            onReply?(param, error)
             guard let self = self else {
                 return true
             }
@@ -145,12 +140,11 @@ public final class NPC: NSObject {
         if let onNotify = onNotify {
             _notifies[id] = {param in
                 completedSemphore.wait()
-                defer{
-                    completedSemphore.signal()
-                }
                 if (completed){
+                    completedSemphore.signal()
                     return
                 }
+                completedSemphore.signal()
                 onNotify(param)
             }
         }
@@ -194,8 +188,8 @@ public final class NPC: NSObject {
             }
             _semphore.wait()
             guard let handle = _handlers[method] else {
-                debugPrint("[NPC] unhandled message: \(message)")
                 _semphore.signal()
+                debugPrint("[NPC] unhandled message: \(message)")
                 break
             }
             _semphore.signal()
@@ -211,6 +205,7 @@ public final class NPC: NSObject {
             _semphore.wait()
             guard let handle = _handlers[method] else {
                 _semphore.signal()
+                debugPrint("[NPC] unhandled message: \(message)")
                 let m = Message(typ: .ack, id: id, error: "unimplemented")
                 send(m)
                 break
@@ -218,12 +213,11 @@ public final class NPC: NSObject {
             _semphore.signal()
             let cancel = handle(message.param, {[weak self] param in
                 completedSemphore.wait()
-                defer{
-                    completedSemphore.signal()
-                }
                 if (completed){
+                    completedSemphore.signal()
                     return
                 }
+                completedSemphore.signal()
                 guard let self = self else {
                     return
                 }
@@ -231,13 +225,12 @@ public final class NPC: NSObject {
                 self.send(m)
             }, {[weak self] param, error in
                 completedSemphore.wait()
-                defer{
-                    completedSemphore.signal()
-                }
                 if (completed){
+                    completedSemphore.signal()
                     return
                 }
                 completed = true
+                completedSemphore.signal()
                 guard let self = self else {
                     return
                 }
@@ -252,13 +245,12 @@ public final class NPC: NSObject {
                 _semphore.wait()
                 _cancels[id] = {[weak self] in
                     completedSemphore.wait()
-                    defer{
-                        completedSemphore.signal()
-                    }
                     if (completed){
+                        completedSemphore.signal()
                         return
                     }
                     completed = true
+                    completedSemphore.signal()
                     cancel()
                     guard let self = self else {
                         return
