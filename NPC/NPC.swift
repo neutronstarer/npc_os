@@ -279,8 +279,12 @@ public final class NPC: NSObject {
     @objc
     public func cleanUp(with reason: Any?){
         _semphore.wait()
-        _replies.forEach { (_,value) in
-            _ = value(nil,reason)
+        var it = _replies.values.makeIterator()
+        while(true){
+            guard let v = it.next() else {
+                break
+            }
+            _ = v(nil,reason)
         }
         _semphore.signal()
     }
