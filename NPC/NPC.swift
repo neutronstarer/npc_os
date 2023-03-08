@@ -116,6 +116,7 @@ public final class NPC: NSObject {
         var completed = false
         let completedSemphore = DispatchSemaphore(value: 1)
         var timer: DispatchSourceTimer?
+        var onReply = onReply
         let reply = {[weak self] (_ param: Any?, _ error: Any?)->Bool in
             completedSemphore.wait()
             if (completed){
@@ -125,7 +126,9 @@ public final class NPC: NSObject {
             completed = true
             completedSemphore.signal()
             timer?.cancel()
+            timer = nil
             onReply?(param, error)
+            onReply = nil
             guard let self = self else {
                 return true
             }

@@ -79,7 +79,7 @@ class ViewController: UIViewController {
     
     
     private func config(_ npc: NPC){
-        npc.on("download") { param, notify, reply in
+        npc.on("download") { param, reply, notify in
             var i = 0
             var completed = false
             let timer = DispatchSource.makeTimerSource()
