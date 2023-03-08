@@ -99,7 +99,7 @@ public final class NPC: NSObject {
     }
     /// Emit method without reply.
     @objc
-    public func emit(_ method: String, param: Any? = nil){
+    public func emit(_ method: String, param: Any? = nil) {
         _semphore.wait()
         let id = nextId()
         _semphore.signal()
@@ -126,8 +126,8 @@ public final class NPC: NSObject {
             completed = true
             completedSemphore.signal()
             timer?.cancel()
-            timer = nil
             onReply?(param, error)
+            timer = nil
             onReply = nil
             guard let self = self else {
                 return true
@@ -185,28 +185,20 @@ public final class NPC: NSObject {
     public func receive(_ message: Message){
         switch(message.typ){
         case .emit:
-            guard let method = message.method else{
-                debugPrint("[NPC] bad message: \(message)")
-                break
-            }
             _semphore.wait()
-            guard let handle = _handlers[method] else {
+            guard let method = message.method, let handle = _handlers[method] else {
                 _semphore.signal()
                 debugPrint("[NPC] unhandled message: \(message)")
                 break
             }
             _semphore.signal()
-            let _ = handle(message.param,  {param,error in}, {param in})
+            let _ = handle(message.param, {param,error in}, {param in})
         case .deliver:
             var completed = false
             let completedSemphore = DispatchSemaphore(value: 1)
             let id = message.id
-            guard let method = message.method else {
-                debugPrint("[NPC] bad message: \(message)")
-                break
-            }
             _semphore.wait()
-            guard let handle = _handlers[method] else {
+            guard let method = message.method, let handle = _handlers[method] else {
                 _semphore.signal()
                 debugPrint("[NPC] unhandled message: \(message)")
                 let m = Message(typ: .ack, id: id, error: "unimplemented")
