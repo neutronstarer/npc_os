@@ -290,15 +290,15 @@ public final class NPC: NSObject {
     }
     
     private func nextId() -> Int{
-        if _id < 0x7fffffff {
+        if _id < 2147483647 {
             _id += 1
         }else{
-            _id = 0
+            _id = -2147483647
         }
         return _id
     }
     
-    private var _id = -1
+    private var _id = -2147483648
     private let _semphore = DispatchSemaphore(value: 1)
     private let _queue = DispatchQueue(label: "com.nuetronstarer.npc")
     private lazy var _cancels = Dictionary<Int, Cancel>()
