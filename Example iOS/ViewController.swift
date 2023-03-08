@@ -20,20 +20,20 @@ class ViewController: UIViewController {
     
     lazy var n0: NPC = {[weak self] in
         let v = NPC()
-        v.send = {[weak self] message in
+        v.connect({[weak self] message in
             debugPrint("0_SEND: \(message)")
             self?.n1.receive(message)
-        }
+        })
         self?.config(v)
         return v
     }()
     
     lazy var n1: NPC = {[weak self] in
         let v = NPC()
-        v.send = {[weak self] message in
+        v.connect({[weak self] message in
             debugPrint("1_SEND: \(message)")
             self?.n0.receive(message)
-        }
+        })
         self?.config(v)
         return v
     }()

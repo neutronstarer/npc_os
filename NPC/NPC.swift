@@ -65,7 +65,7 @@ public final class Message: NSObject{
 public final class NPC: NSObject {
     
     deinit {
-        cleanUp(with: "disconnected")
+        disconnect()
     }
     
     @objc
@@ -73,9 +73,25 @@ public final class NPC: NSObject {
         super.init()
     }
     
-    /// Must set this value before work.
     @objc
-    public var send: Send!
+    public func connect(_ send: @escaping Send){
+        disconnect()
+        self.send = send
+    }
+    
+    @objc
+    public func disconnect(){
+        _semphore.wait()
+        let replies = _replies.values
+        let cancels = _cancels.values
+        _semphore.signal()
+        replies.forEach { reply in
+            _ = reply(nil, "disconnected")
+        }
+        cancels.forEach { cancel in
+            cancel()
+        }
+    }
 
     /// Register handle by method name.
     @objc
@@ -84,6 +100,7 @@ public final class NPC: NSObject {
     }
     
     /// Register handle by method name.
+    @objc
     public subscript(_ method: String) -> Handle? {
         get{
             _semphore.wait()
@@ -101,6 +118,10 @@ public final class NPC: NSObject {
     @objc
     public func emit(_ method: String, param: Any? = nil) {
         _semphore.wait()
+        guard let send = send else {
+            _semphore.signal()
+            return
+        }
         let id = nextId()
         _semphore.signal()
         let m = Message(typ: .emit, id: id, method: method, param: param)
@@ -112,6 +133,10 @@ public final class NPC: NSObject {
     @discardableResult
     public func deliver(_ method: String, param: Any? = nil, timeout: TimeInterval = 0, onReply: Reply? = nil, onNotify: Notify? = nil)->Cancel{
         _semphore.wait()
+        guard let send = send else{
+            onReply?(nil,"disconnected")
+            return {}
+        }
         let id = nextId()
         var completed = false
         let completedSemphore = DispatchSemaphore(value: 1)
@@ -161,7 +186,7 @@ public final class NPC: NSObject {
                         return
                     }
                     let m = Message(typ: .cancel, id: id)
-                    self.send(m)
+                    self.send?(m)
                 }
             })
             timer!.resume()
@@ -172,7 +197,7 @@ public final class NPC: NSObject {
                     return
                 }
                 let m = Message(typ: .cancel, id: id)
-                self.send(m)
+                self.send?(m)
             }
         }
         let m = Message(typ: .deliver, id: id, method: method, param: param)
@@ -202,7 +227,7 @@ public final class NPC: NSObject {
                 _semphore.signal()
                 debugPrint("[NPC] unhandled message: \(message)")
                 let m = Message(typ: .ack, id: id, error: "unimplemented")
-                send(m)
+                send?(m)
                 break
             }
             _semphore.signal()
@@ -222,7 +247,7 @@ public final class NPC: NSObject {
                 self._cancels.removeValue(forKey: id)
                 semphore.signal()
                 let m = Message(typ: .ack, id: id, param: param, error: error)
-                self.send(m)
+                self.send?(m)
             }, {[weak self] param in
                 completedSemphore.wait()
                 if (completed){
@@ -234,7 +259,7 @@ public final class NPC: NSObject {
                     return
                 }
                 let m = Message(typ: .notify, id: id, param: param)
-                self.send(m)
+                self.send?(m)
             })
             if let cancel = cancel {
                 _semphore.wait()
@@ -275,17 +300,6 @@ public final class NPC: NSObject {
         }
     }
     
-    /// Clean up all deliveries with special reason,  used when the connection is down.
-    @objc
-    public func cleanUp(with reason: Any?){
-        _semphore.wait()
-        let values = _replies.values
-        _semphore.signal()
-        values.forEach { value in
-            _ = value(nil, reason)
-        }
-    }
-    
     private func nextId() -> Int{
         if _id < 2147483647 {
             _id += 1
@@ -295,6 +309,7 @@ public final class NPC: NSObject {
         return _id
     }
     
+    private var send: Send?
     private var _id = -2147483648
     private let _semphore = DispatchSemaphore(value: 1)
     private let _queue = DispatchQueue(label: "com.nuetronstarer.npc")
