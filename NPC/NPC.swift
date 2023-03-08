@@ -3,7 +3,7 @@ import Foundation
 /// Cancel.
 public typealias Cancel = ()->Void
 /// Method Handle.
-public typealias Handle = (_ param: Any?, _ notify: @escaping Notify, _ reply: @escaping Reply) -> Cancel?
+public typealias Handle = (_ param: Any?, _ reply: @escaping Reply, _ notify: @escaping Notify) -> Cancel?
 /// Notify.
 public typealias Notify = (_ param: Any?) -> Void
 /// Reply.
@@ -65,7 +65,7 @@ public final class Message: NSObject{
 public final class NPC: NSObject {
     
     deinit {
-        cleanUpDeliveries(with: "disconnected")
+        cleanUp(with: "disconnected")
     }
     
     @objc
@@ -193,7 +193,7 @@ public final class NPC: NSObject {
                 break
             }
             _semphore.signal()
-            let _ = handle(message.param, {param in}, {param,error in})
+            let _ = handle(message.param,  {param,error in}, {param in})
         case .deliver:
             var completed = false
             let completedSemphore = DispatchSemaphore(value: 1)
@@ -211,19 +211,7 @@ public final class NPC: NSObject {
                 break
             }
             _semphore.signal()
-            let cancel = handle(message.param, {[weak self] param in
-                completedSemphore.wait()
-                if (completed){
-                    completedSemphore.signal()
-                    return
-                }
-                completedSemphore.signal()
-                guard let self = self else {
-                    return
-                }
-                let m = Message(typ: .notify, id: id, param: param)
-                self.send(m)
-            }, {[weak self] param, error in
+            let cancel = handle(message.param, {[weak self] param, error in
                 completedSemphore.wait()
                 if (completed){
                     completedSemphore.signal()
@@ -239,6 +227,18 @@ public final class NPC: NSObject {
                 self._cancels.removeValue(forKey: id)
                 semphore.signal()
                 let m = Message(typ: .ack, id: id, param: param, error: error)
+                self.send(m)
+            }, {[weak self] param in
+                completedSemphore.wait()
+                if (completed){
+                    completedSemphore.signal()
+                    return
+                }
+                completedSemphore.signal()
+                guard let self = self else {
+                    return
+                }
+                let m = Message(typ: .notify, id: id, param: param)
                 self.send(m)
             })
             if let cancel = cancel {
@@ -280,9 +280,9 @@ public final class NPC: NSObject {
         }
     }
     
-    /// Clean up all deliveries with special reason.
+    /// Clean up all deliveries with special reason,  used when the connection is down.
     @objc
-    public func cleanUpDeliveries(with reason: Any?){
+    public func cleanUp(with reason: Any?){
         _semphore.wait()
         _replies.forEach { (_,value) in
             _ = value(nil,reason)
