@@ -58,33 +58,38 @@ public final class Message: NSObject{
             return v.description
         }
     }
-
+    
 }
 
 /// `NPC`  Near Procedure Call.
 public final class NPC: NSObject {
-    
-    deinit {
-        disconnect()
-    }
     
     @objc
     public override init(){
         super.init()
     }
     
+    deinit {
+        disconnect()
+    }
+    
     @objc
     public func connect(_ send: @escaping Send){
         disconnect()
-        self.send = send
+        queue.sync {
+            self.send = send
+        }
     }
     
     @objc
     public func disconnect(){
-        _semphore.wait()
-        let replies = _replies.values
-        let cancels = _cancels.values
-        _semphore.signal()
+        var replies: Dictionary<Int, (_ param: Any?, _ error: Any?) -> Bool>.Values!
+        var cancels: Dictionary<Int, Cancel>.Values!
+        queue.sync {
+            replies = self.replies.values
+            cancels = self.cancels.values
+            send = nil
+        }
         replies.forEach { reply in
             _ = reply(nil, "disconnected")
         }
@@ -92,7 +97,7 @@ public final class NPC: NSObject {
             cancel()
         }
     }
-
+    
     /// Register handle by method name.
     @objc
     public func on(_ method: String, handle: Handle?){
@@ -103,218 +108,192 @@ public final class NPC: NSObject {
     @objc
     public subscript(_ method: String) -> Handle? {
         get{
-            _semphore.wait()
-            let handle = _handlers[method]
-            _semphore.signal()
+            var handle: Handle?
+            queue.sync {
+                handle = handlers[method]
+            }
             return handle
         }
         set{
-            _semphore.wait()
-            _handlers[method] = newValue
-            _semphore.signal()
+            queue.sync {
+                handlers[method] = newValue
+            }
         }
     }
     /// Emit method without reply.
     @objc
     public func emit(_ method: String, param: Any? = nil) {
-        _semphore.wait()
-        guard let send = send else {
-            _semphore.signal()
-            return
+        queue.sync {
+            let id = self.nextId()
+            let m = Message(typ: .emit, id: id, method: method, param: param)
+            self.send?(m)
         }
-        let id = nextId()
-        _semphore.signal()
-        let m = Message(typ: .emit, id: id, method: method, param: param)
-        send(m)
     }
     
     /// Deliver message with reply.
     @objc
     @discardableResult
     public func deliver(_ method: String, param: Any? = nil, timeout: TimeInterval = 0, onReply: Reply? = nil, onNotify: Notify? = nil)->Cancel{
-        _semphore.wait()
-        guard let send = send else{
-            onReply?(nil,"disconnected")
-            return {}
-        }
-        let id = nextId()
-        var completed = false
-        let completedSemphore = DispatchSemaphore(value: 1)
-        var timer: DispatchSourceTimer?
-        var onReply = onReply
-        let reply = {[weak self] (_ param: Any?, _ error: Any?)->Bool in
-            completedSemphore.wait()
-            if (completed){
-                completedSemphore.signal()
-                return false
+        var cancel: (()->Void)!
+        queue.sync {
+            guard let send = send else{
+                DispatchQueue.main.async {
+                    onReply?(nil, "disconnected")
+                }
+                cancel = {}
+                return
             }
-            completed = true
-            completedSemphore.signal()
-            timer?.cancel()
-            onReply?(param, error)
-            timer = nil
-            onReply = nil
-            guard let self = self else {
+            let id = nextId()
+            var completed = false
+            var timer: DispatchSourceTimer?
+            var onReply = onReply
+            let reply = {[weak self] (_ param: Any?, _ error: Any?)->Bool in
+                // in queue
+                if (completed){
+                    return false
+                }
+                completed = true
+                timer?.cancel()
+                timer = nil
+                onReply = nil
+                DispatchQueue.main.async {
+                    onReply?(param, error)
+                }
+                guard let self = self else {
+                    return true
+                }
+                self.notifies.removeValue(forKey: id)
+                self.replies.removeValue(forKey: id)
                 return true
             }
-            let semphore = self._semphore
-            semphore.wait()
-            self._notifies.removeValue(forKey: id)
-            self._replies.removeValue(forKey: id)
-            semphore.signal()
-            return true
-        }
-        _replies[id] = reply
-        if let onNotify = onNotify {
-            _notifies[id] = {param in
-                completedSemphore.wait()
-                if (completed){
-                    completedSemphore.signal()
-                    return
-                }
-                completedSemphore.signal()
-                onNotify(param)
-            }
-        }
-        _semphore.signal()
-        if timeout > 0 {
-            timer = DispatchSource.makeTimerSource(flags: [], queue: _queue)
-            timer!.schedule(deadline: .now() + .nanoseconds(Int(timeout*1000000000)))
-            timer!.setEventHandler(handler: {[weak self] in
-                if reply(nil, "timedout") {
-                    guard let self = self else {
+            replies[id] = reply
+            if let onNotify = onNotify {
+                notifies[id] = {param in
+                    if (completed){
                         return
                     }
-                    let m = Message(typ: .cancel, id: id)
-                    self.send?(m)
+                    DispatchQueue.main.async {
+                        onNotify(param)
+                    }
                 }
-            })
-            timer!.resume()
-        }
-        let cancel = {[weak self] in
-            if reply(nil, "cancelled"){
-                guard let self = self else {
-                    return
-                }
-                let m = Message(typ: .cancel, id: id)
-                self.send?(m)
             }
+            if timeout > 0 {
+                timer = DispatchSource.makeTimerSource(flags: [], queue: queue)
+                timer!.schedule(deadline: .now() + .nanoseconds(Int(timeout*1000000000)))
+                timer!.setEventHandler(handler: {[weak self] in
+                    if reply(nil, "timedout") {
+                        let m = Message(typ: .cancel, id: id)
+                        self?.send?(m)
+                    }
+                })
+                timer!.resume()
+            }
+            cancel = {[weak self] in
+                self?.queue.async {[weak self] in
+                    if reply(nil, "cancelled"){
+                        let m = Message(typ: .cancel, id: id)
+                        self?.send?(m)
+                    }
+                }
+                
+            }
+            let m = Message(typ: .deliver, id: id, method: method, param: param)
+            send(m)
         }
-        let m = Message(typ: .deliver, id: id, method: method, param: param)
-        send(m)
         return cancel
     }
-
+    
     /// Receive message.
     @objc
     public func receive(_ message: Message){
-        switch(message.typ){
-        case .emit:
-            _semphore.wait()
-            guard let method = message.method, let handle = _handlers[method] else {
-                _semphore.signal()
-                debugPrint("[NPC] unhandled message: \(message)")
-                break
+        queue.async {[weak self] in
+            guard let self = self else {
+                return
             }
-            _semphore.signal()
-            let _ = handle(message.param, {param,error in}, {param in})
-        case .deliver:
-            var completed = false
-            let completedSemphore = DispatchSemaphore(value: 1)
-            let id = message.id
-            _semphore.wait()
-            guard let method = message.method, let handle = _handlers[method] else {
-                _semphore.signal()
-                debugPrint("[NPC] unhandled message: \(message)")
-                let m = Message(typ: .ack, id: id, error: "unimplemented")
-                send?(m)
-                break
-            }
-            _semphore.signal()
-            let cancel = handle(message.param, {[weak self] param, error in
-                completedSemphore.wait()
-                if (completed){
-                    completedSemphore.signal()
-                    return
+            switch(message.typ){
+            case .emit:
+                guard let method = message.method, let handle = self.handlers[method] else {
+                    debugPrint("[NPC] unhandled message: \(message)")
+                    break
                 }
-                completed = true
-                completedSemphore.signal()
-                guard let self = self else {
-                    return
+                let param = message.param
+                DispatchQueue.main.async {
+                    let _ = handle(param, {param, error in}, {param in})
                 }
-                let semphore = self._semphore
-                semphore.wait()
-                self._cancels.removeValue(forKey: id)
-                semphore.signal()
-                let m = Message(typ: .ack, id: id, param: param, error: error)
-                self.send?(m)
-            }, {[weak self] param in
-                completedSemphore.wait()
-                if (completed){
-                    completedSemphore.signal()
-                    return
+            case .deliver:
+                var completed = false
+                let id = message.id
+                guard let method = message.method, let handle = self.handlers[method] else {
+                    debugPrint("[NPC] unhandled message: \(message)")
+                    let m = Message(typ: .ack, id: id, error: "unimplemented")
+                    self.send?(m)
+                    break
                 }
-                completedSemphore.signal()
-                guard let self = self else {
-                    return
+                let param = message.param
+                var cancel: (()->Void)!
+                DispatchQueue.main.sync {
+                    cancel = handle(param, {[weak self] param, error in
+                        /// in queue
+                        self?.queue.async {
+                            if (completed){
+                                return
+                            }
+                            completed = true
+                            self?.cancels.removeValue(forKey: id)
+                            let m = Message(typ: .ack, id: id, param: param, error: error)
+                            self?.send?(m)
+                        }
+                    }, {[weak self] param in
+                        /// in queue
+                        self?.queue.async {
+                            if (completed){
+                                return
+                            }
+                            let m = Message(typ: .notify, id: id, param: param)
+                            self?.send?(m)
+                        }
+                    })
                 }
-                let m = Message(typ: .notify, id: id, param: param)
-                self.send?(m)
-            })
-            if let cancel = cancel {
-                _semphore.wait()
-                _cancels[id] = {[weak self] in
-                    completedSemphore.wait()
-                    if (completed){
-                        completedSemphore.signal()
-                        return
+                if let cancel = cancel {
+                    self.cancels[id] = {[weak self] in
+                        /// in queue
+                        if (completed){
+                            return
+                        }
+                        completed = true
+                        self?.cancels.removeValue(forKey: id)
+                        DispatchQueue.main.async {
+                            cancel()
+                        }
                     }
-                    completed = true
-                    completedSemphore.signal()
-                    cancel()
-                    guard let self = self else {
-                        return
-                    }
-                    let semphore = self._semphore
-                    semphore.wait()
-                    self._cancels.removeValue(forKey: id)
-                    semphore.signal()
                 }
-                _semphore.signal()
+            case .ack:
+                let reply = self.replies[message.id]
+                let _ = reply?(message.param, message.error)
+            case .notify:
+                let notify = self.notifies[message.id]
+                notify?(message.param)
+            case .cancel:
+                let cancel = self.cancels[message.id]
+                cancel?()
             }
-        case .ack:
-            _semphore.wait()
-            let reply = _replies[message.id]
-            _semphore.signal()
-            let _ = reply?(message.param, message.error)
-        case .notify:
-            _semphore.wait()
-            let notify = _notifies[message.id]
-            _semphore.signal()
-            notify?(message.param)
-        case .cancel:
-            _semphore.wait()
-            let cancel = _cancels[message.id]
-            _semphore.signal()
-            cancel?()
         }
     }
     
     private func nextId() -> Int{
-        if _id < 2147483647 {
-            _id += 1
+        if id < 2147483647 {
+            id += 1
         }else{
-            _id = -2147483647
+            id = -2147483647
         }
-        return _id
+        return id
     }
     
     private var send: Send?
-    private var _id = -2147483648
-    private let _semphore = DispatchSemaphore(value: 1)
-    private let _queue = DispatchQueue(label: "com.nuetronstarer.npc")
-    private lazy var _cancels = Dictionary<Int, Cancel>()
-    private lazy var _notifies = Dictionary<Int, Notify>()
-    private lazy var _replies = Dictionary<Int, (_ param: Any?, _ error: Any?) -> Bool>()
-    private lazy var _handlers = Dictionary<String, Handle>()
+    private var id = -2147483648
+    private let queue = DispatchQueue(label: "com.nuetronstarer.npc")
+    private lazy var cancels = Dictionary<Int, Cancel>()
+    private lazy var notifies = Dictionary<Int, Notify>()
+    private lazy var replies = Dictionary<Int, (_ param: Any?, _ error: Any?) -> Bool>()
+    private lazy var handlers = Dictionary<String, Handle>()
 }
