@@ -82,12 +82,13 @@ public final class NPC: NSObject {
     }
     
     @objc
-    public func disconnect(){
+    public func disconnect(_ reason: Any? = nil){
+        let error = reason ?? "disconnected"
         queue.sync {
             let replies = self.replies.values
             let cancels = self.cancels.values
             replies.forEach { reply in
-                _ = reply(nil, "disconnected")
+                _ = reply(nil, error)
             }
             cancels.forEach { cancel in
                 cancel()
