@@ -83,18 +83,16 @@ public final class NPC: NSObject {
     
     @objc
     public func disconnect(){
-        var replies: Dictionary<Int, (_ param: Any?, _ error: Any?) -> Bool>.Values!
-        var cancels: Dictionary<Int, Cancel>.Values!
         queue.sync {
-            replies = self.replies.values
-            cancels = self.cancels.values
+            let replies = self.replies.values
+            let cancels = self.cancels.values
+            replies.forEach { reply in
+                _ = reply(nil, "disconnected")
+            }
+            cancels.forEach { cancel in
+                cancel()
+            }
             send = nil
-        }
-        replies.forEach { reply in
-            _ = reply(nil, "disconnected")
-        }
-        cancels.forEach { cancel in
-            cancel()
         }
     }
     
