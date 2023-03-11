@@ -87,6 +87,7 @@ public final class NPC: NSObject {
         queue.sync {
             let replies = self.replies.values
             let cancels = self.cancels.values
+            
             replies.forEach { reply in
                 _ = reply(nil, error)
             }
@@ -153,11 +154,11 @@ public final class NPC: NSObject {
                 }
                 completed = true
                 timer?.cancel()
-                timer = nil
-                onReply = nil
                 DispatchQueue.main.async {
                     onReply?(param, error)
                 }
+                timer = nil
+                onReply = nil
                 guard let self = self else {
                     return true
                 }
