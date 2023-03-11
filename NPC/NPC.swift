@@ -154,11 +154,11 @@ public final class NPC: NSObject {
                 }
                 completed = true
                 timer?.cancel()
+                timer = nil
                 DispatchQueue.main.async {
                     onReply?(param, error)
+                    onReply = nil
                 }
-                timer = nil
-                onReply = nil
                 guard let self = self else {
                     return true
                 }
