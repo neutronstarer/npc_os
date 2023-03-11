@@ -16,7 +16,7 @@ Pod::Spec.new do |spec|
   #
 
   spec.name         = "NPC"
-  spec.version      = "4.7.1"
+  spec.version      = "4.7.2"
   spec.summary      = "Near Procedure Call."
 
   # This description is used to generate tags and improve search results.
